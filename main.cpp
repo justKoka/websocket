@@ -1,6 +1,7 @@
 #include "network_interface.h"
 
 int main(int argc, char **argv){
-	NETWORK_INTERFACE->run();
+	Auth_base auth;
+	NETWORK_INTERFACE->run(auth);
 	return 0;
 }

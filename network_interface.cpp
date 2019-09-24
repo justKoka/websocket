@@ -2,6 +2,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/ioctl.h>
+#include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
@@ -38,6 +40,7 @@ int Network_Interface::init(){
 	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	server_addr.sin_port = htons(PORT);
 	if(-1 == bind(listenfd_, (struct sockaddr *)(&server_addr), sizeof(server_addr))){
+		int er = errno;
 		DEBUG_LOG("绑定套接字失败!");
 		return -1;
 	}
@@ -58,12 +61,16 @@ int Network_Interface::epoll_loop(){
 	int nfds = 0;
 	int fd = 0;
 	int bufflen = 0;
+	int nBytesLeft = 0;
+	uint8_t buff[BUFFLEN];	
+	memset(buff, 0, BUFFLEN);
 	struct epoll_event events[MAXEVENTSSIZE];
 	while(true){
 		nfds = epoll_wait(epollfd_, events, MAXEVENTSSIZE, TIMEWAIT);
 		for(int i = 0; i < nfds; i++){
 			if(events[i].data.fd == listenfd_){
 				fd = accept(listenfd_, (struct sockaddr *)&client_addr, &clilen);
+				//auto er = errno;
 				ctl_event(fd, true);
 			}
 			else if(events[i].events & EPOLLIN){
@@ -72,12 +79,38 @@ int Network_Interface::epoll_loop(){
 				Websocket_Handler *handler = websocket_handler_map_[fd];
 				if(handler == NULL)
 					continue;
-				if((bufflen = read(fd, handler->getbuff(), BUFFLEN)) <= 0){
+
+				bufflen = read(fd, buff, BUFFLEN);
+				DEBUG_LOG("%d bytes read", bufflen);
+				ioctl(fd, FIONREAD, &nBytesLeft);
+				DEBUG_LOG("%d bytes left to read", nBytesLeft);
+				//if (nBytesLeft > 0)
+				//{
+				//	/*DEBUG_LOG("message is long, reading all other bytes");
+				//	std::string stringBuff;
+				//	stringBuff.reserve(BUFFLEN + nBytesLeft);
+				//	stringBuff = buff;
+				//	while (nBytesLeft > 0)
+				//	{
+				//		memset(buff, 0, BUFFLEN);
+				//		bufflen = read(fd, buff, BUFFLEN);
+				//		stringBuff += buff;
+				//		ioctl(fd, FIONREAD, &nBytesLeft);
+				//	}
+				//	DEBUG_LOG("all bytes read");
+				//	handler->attach(stringBuff);*/
+				//}
+				//else
+				//{
+				//	handler->attach(buff);
+				//}
+				if(bufflen <= 0) {
 					ctl_event(fd, false);
 				}
-				else{
-					handler->process();
+				else{					
+					handler->process(buff, bufflen);
 				}
+				memset(buff, 0, BUFFLEN);
 			}
 		}
 	}
@@ -93,8 +126,10 @@ int Network_Interface::set_noblock(int fd){
 }
 
 Network_Interface *Network_Interface::get_share_network_interface(){
-	if(m_network_interface == NULL)
+	if (m_network_interface == NULL)
+	{
 		m_network_interface = new Network_Interface();
+	}
 	return m_network_interface;
 }
 
@@ -105,18 +140,19 @@ void Network_Interface::ctl_event(int fd, bool flag){
 	epoll_ctl(epollfd_, flag ? EPOLL_CTL_ADD : EPOLL_CTL_DEL, fd, &ev);
 	if(flag){
 		set_noblock(fd);
-		websocket_handler_map_[fd] = new Websocket_Handler(fd);
+		websocket_handler_map_[fd] = new Websocket_Handler(fd,authentication);
 		if(fd != listenfd_)
-			DEBUG_LOG("fd: %d 加入epoll循环", fd);
+			DEBUG_LOG("fd: %d starting epoll loop", fd);
 	}
 	else{
 		close(fd);
 		delete websocket_handler_map_[fd];
 		websocket_handler_map_.erase(fd);
-		DEBUG_LOG("fd: %d 退出epoll循环", fd);
+		DEBUG_LOG("fd: %d exiting epoll loop", fd);
 	}
 }
 
-void Network_Interface::run(){
+void Network_Interface::run(Auth_base &auth){
+	authentication = auth;
 	epoll_loop();
 }

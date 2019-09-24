@@ -4,13 +4,19 @@
 #include <arpa/inet.h>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <unordered_map>
+#include <list>
 #include <sstream>
 #include "base64.h"
 #include "sha1.h"
 #include "debug_log.h"
 #include "websocket_request.h"
+#include "websocket_message.h"
+#include <jansson.h>
+#include "Auth_base.h"
 
-#define MAGIC_KEY "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+constexpr char MAGIC_KEY[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 enum WEBSOCKET_STATUS {
 	WEBSOCKET_UNCONNECT = 0,
@@ -21,25 +27,28 @@ typedef std::map<std::string, std::string> HEADER_MAP;
 
 class Websocket_Handler{
 public:
-	Websocket_Handler(int fd);
+	Websocket_Handler(int fd, Auth_base authentication);
 	~Websocket_Handler();
-	int process();
-	inline char *getbuff();
+	int process(uint8_t buff[], int bufflen);
+	void attach(const std::string& msg);
 private:
-	int handshark();
+	int handshark(uint8_t* request);
 	void parse_str(char *request);
 	int fetch_http_info();
-	int send_data(char *buff);
+	int send_data(uint8_t *buff, int datalen);
+	int send_frame(uint8_t *frame, int datalen);
+	void onSuccessfulSubscribe(const std::string &channel);
+	void make_frame(const char* msg, int msg_length, uint8_t* buffer);
 private:
-	char buff_[2048];
+	uint8_t buffer[2048];
+	websocket_message wsMessage;
 	WEBSOCKET_STATUS status_;
 	HEADER_MAP header_map_;
 	int fd_;
-	Websocket_Request *request_;
+	Auth_base authentication;
+	static std::unordered_map<std::string, int> subscriptions;
+	std::list<std::string> subscribedChannels;
+	//virtual void on_event();
 };
-
-inline char *Websocket_Handler::getbuff(){
-	return buff_;
-}
 
 #endif

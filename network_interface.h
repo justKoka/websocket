@@ -1,12 +1,12 @@
 #ifndef __NETWORK_INTERFACE__
 #define __NETWORK_INTERFACE__
-
+#include "Auth_base.h"
 #include "websocket_handler.h"
 
-#define PORT 9000
-#define TIMEWAIT 100
-#define BUFFLEN 2048
-#define MAXEVENTSSIZE 20
+constexpr int PORT = 9001;
+constexpr int TIMEWAIT = 100;
+constexpr int BUFFLEN = 2048;
+constexpr int MAXEVENTSSIZE = 20;
 
 typedef std::map<int, Websocket_Handler *> WEB_SOCKET_HANDLER_MAP;
 
@@ -19,9 +19,10 @@ private:
 	int set_noblock(int fd);
 	void ctl_event(int fd, bool flag);
 public:
-	void run();
+	void run(Auth_base&);
 	static Network_Interface *get_share_network_interface();
 private:
+	Auth_base authentication;
 	int epollfd_;
 	int listenfd_;
 	WEB_SOCKET_HANDLER_MAP websocket_handler_map_;
