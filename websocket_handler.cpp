@@ -18,20 +18,21 @@ Websocket_Handler::Websocket_Handler(int fd, Auth_base authentication):
 Websocket_Handler::~Websocket_Handler(){
 }
 
-int Websocket_Handler::process(uint8_t buff[], int bufflen) {
+int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	if (status_ == WEBSOCKET_UNCONNECT) {
-		attach((const char*)buff);
-		return handshark();
+		return handshark(inbuff, bufflen);
 	}
-	wsMessage.handle(buff, buffer);
+	if (bufflen < 2048)
+	{
+	wsMessage.handle(inbuff, buffer);
 	json_error_t jerror;
 	buffer[wsMessage.plength] = '\0';
-	json_t *json = json_loadb((char*)buffer, wsMessage.plength+1, 0, &jerror);
+	json_t *json = json_loadb((const char*)buffer, wsMessage.plength + 1, 0, &jerror);
 	/*if (!json)
 		DEBUG_LOG("Error parsing json data from server: %s\ndata was: %s",
 			jerror.text, request_->get_payload().c_str());
-*/
-	const std::string channelEvent = json_object_get(json, "event") ? 
+	*/
+	const std::string channelEvent = json_object_get(json, "event") ?
 		json_string_value(json_object_get(json, "event")) : "";
 	const std::string channel = json_object_get(json, "channel") ?
 		json_string_value(json_object_get(json, "channel")) : "";
@@ -44,9 +45,9 @@ int Websocket_Handler::process(uint8_t buff[], int bufflen) {
 		if (channel.compare(0, 9, "private-", 0, 9))
 		{
 			DEBUG_LOG("subcription to private channel %s, authentication required", channel.c_str());
-			if (authentication.privateAuth(channel,sdata))
+			if (authentication.privateAuth(channel, sdata))
 			{
-				onSuccessfulSubscribe(channel);
+				onSuccessfulSubscribe(channel, inbuff);
 				DEBUG_LOG("authentication succeed, subscribed on private channel %s", channel.c_str());
 			}
 			else
@@ -57,7 +58,7 @@ int Websocket_Handler::process(uint8_t buff[], int bufflen) {
 			DEBUG_LOG("subcription to presence channel %s, authentication required", channel.c_str());
 			if (authentication.presenceAuth(channel, sdata))
 			{
-				onSuccessfulSubscribe(channel);
+				onSuccessfulSubscribe(channel, inbuff);
 				DEBUG_LOG("authentication succeed, subscribed on presence channel %s", channel.c_str());
 			}
 			else
@@ -66,25 +67,89 @@ int Websocket_Handler::process(uint8_t buff[], int bufflen) {
 		else
 		{
 			DEBUG_LOG("subcription to channel %s", channel.c_str());
-			onSuccessfulSubscribe(channel);
+			onSuccessfulSubscribe(channel, inbuff);
 			DEBUG_LOG("subscribed on channel %s", channel.c_str());
 		}
 	}
 	else if (channelEvent == "pusher:unsubscribe")
-	{ 
+	{
 		//unsubcribe(channel);
 		DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
 	}
-	send_frame(buffer, wsMessage.plength);
+	send_frame(buffer, wsMessage.plength, inbuff);
+}
+	else {
+		std::unique_ptr<uint8_t[]> adbuf;
+		wsMessage.handle(inbuff, adbuf.get());
+		json_error_t jerror;
+		adbuf.get()[wsMessage.plength] = '\0';
+		json_t *json = json_loadb((const char*)adbuf.get(), wsMessage.plength + 1, 0, &jerror);
+		/*if (!json)
+			DEBUG_LOG("Error parsing json data from server: %s\ndata was: %s",
+				jerror.text, request_->get_payload().c_str());
+		*/
+		const std::string channelEvent = json_object_get(json, "event") ?
+			json_string_value(json_object_get(json, "event")) : "";
+		const std::string channel = json_object_get(json, "channel") ?
+			json_string_value(json_object_get(json, "channel")) : "";
+		const std::string sdata = json_object_get(json, "data") ?
+			(json_is_string(json_object_get(json, "data")) ?
+				json_string_value(json_object_get(json, "data")) : "")
+			: "";
+
+		if (channelEvent == "pusher:subscribe") {
+			if (channel.compare(0, 9, "private-", 0, 9))
+			{
+				DEBUG_LOG("subcription to private channel %s, authentication required", channel.c_str());
+				if (authentication.privateAuth(channel, sdata))
+				{
+					onSuccessfulSubscribe(channel, inbuff);
+					DEBUG_LOG("authentication succeed, subscribed on private channel %s", channel.c_str());
+				}
+				else
+					DEBUG_LOG("authentication failed");
+			}
+			else if (channel.compare(0, 10, "presence-", 0, 10))
+			{
+				DEBUG_LOG("subcription to presence channel %s, authentication required", channel.c_str());
+				if (authentication.presenceAuth(channel, sdata))
+				{
+					onSuccessfulSubscribe(channel, inbuff);
+					DEBUG_LOG("authentication succeed, subscribed on presence channel %s", channel.c_str());
+				}
+				else
+					DEBUG_LOG("authentication failed");
+			}
+			else
+			{
+				DEBUG_LOG("subcription to channel %s", channel.c_str());
+				onSuccessfulSubscribe(channel, inbuff);
+				DEBUG_LOG("subscribed on channel %s", channel.c_str());
+			}
+		}
+		else if (channelEvent == "pusher:unsubscribe")
+		{
+			//unsubcribe(channel);
+			DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
+		}
+		send_frame(adbuf.get(), wsMessage.plength, inbuff);
+	}
 	return 0;
 }
 
-int Websocket_Handler::handshark(uint8_t* request){
-	char request[1024] = {};
+int Websocket_Handler::process(uint8_t buff[], uint8_t adBuff[], int bufflen)
+{
+	return 0;
+}
+
+int Websocket_Handler::handshark(uint8_t* request, int datalen){
+
 	status_ = WEBSOCKET_HANDSHARKED;
-	fetch_http_info();
-	parse_str(request);
-	return send_data(request);
+	request[datalen] = '\0';
+	fetch_http_info((char*)request);
+	memset(buffer, 0, 2048);
+	parse_str((char*)buffer);
+	return send_data(buffer, strlen((char*)buffer));
 }
 
 void Websocket_Handler::parse_str(char *request){  
@@ -109,7 +174,7 @@ void Websocket_Handler::parse_str(char *request){
 	strcat(request, "Upgrade: websocket\r\n\r\n");
 }
 
-int Websocket_Handler::fetch_http_info(){
+int Websocket_Handler::fetch_http_info(char *message){
 	std::istringstream s(message);
 	std::string request;
 
@@ -141,50 +206,56 @@ int Websocket_Handler::fetch_http_info(){
 	return 0;
 }
 
-int Websocket_Handler::send_data(char *buff){
-	return write(fd_, buff, strlen(buff));
-}
-
-int Websocket_Handler::send_data(uint8_t * buff)
+int Websocket_Handler::send_data(uint8_t * buff, int datalen)
 {
-	return write(fd_, buff, strlen((char*)buff));
+	return write(fd_, buff, datalen);
 }
 
-int Websocket_Handler::send_frame(const std::string &frame)
+int Websocket_Handler::send_frame(uint8_t *frame, int datalen, uint8_t *Buf)
 {
-	std::unique_ptr<unsigned char[]> Buf(new unsigned char[frame.length() + 16]);
-	make_frame(frame.c_str(), frame.length(), Buf.get());
-	return send_data(Buf.get());
+	if (datalen < 2048) {
+		memset(Buf, 0, datalen);
+		int framelen = make_frame(frame, datalen, Buf);
+		return send_data(Buf, framelen);
+	}
+	else {
+		std::unique_ptr<uint8_t[]> adbuf(new uint8_t[datalen + 20]);
+		int framelen = make_frame(frame, datalen, adbuf.get());
+		return send_data(adbuf.get(), framelen);
+	}
 }
 
-void Websocket_Handler::onSuccessfulSubscribe(const std::string & channel)
+void Websocket_Handler::onSuccessfulSubscribe(const std::string & channel, uint8_t *buffer)
 {
 	Websocket_Handler::subscriptions.insert(std::make_pair(channel, fd_));
 	subscribedChannels.push_back(channel);
 	std::stringstream tmp;
 	tmp << "{\"event\":\"pusher:subscription_succeed\",\"channel\":\"" << channel << "\"}";
-	send_frame(tmp.str());
+	send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), buffer);
 }
 
-void Websocket_Handler::make_frame(const char * msg, int msg_length, uint8_t * buffer)
+int Websocket_Handler::make_frame(uint8_t * msg, int msg_length, uint8_t * buffer)
 {
 	int pos = 0;
-	buffer[pos++] = (unsigned char)0x81; // text frame
+	buffer[pos++] = (unsigned char)0x81;// text frame
 	if (msg_length <= 125) {
 		buffer[pos++] = msg_length;
 	}
 	else if (msg_length <= 65535) {
 		buffer[pos++] = 126; //16 bit length follows
+		//uint16_t payload_len = msg_length
 		uint16_t payload_len = htons(msg_length);
-		memcpy((void *)(buffer + pos), &msg_length, 2);
+		//check this
+		memcpy((void *)(buffer + pos), &payload_len, 2);
 		pos += 2;
 	}
 	else { // >2^16-1 (65535)
 		buffer[pos++] = 127; //64 bit length follows
-		uint32_t payload_len = ntohl(msg_length);
-		memcpy((void *)(buffer + pos), &payload_len, 4);
-		pos += 4;
+		//same as previous
+		uint64_t payload_len = ntohl(msg_length);
+		memcpy((void *)(buffer + pos), &payload_len, 8);
+		pos += 8;
 	}
-	memcpy((void *)(buffer + pos), msg, msg_length);
-	buffer[pos + msg_length] = '\0';
+	memcpy((void *)(buffer + pos), (void *)msg, msg_length);
+	return pos + msg_length;
 }

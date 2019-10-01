@@ -70,7 +70,7 @@ int Network_Interface::epoll_loop(){
 		for(int i = 0; i < nfds; i++){
 			if(events[i].data.fd == listenfd_){
 				fd = accept(listenfd_, (struct sockaddr *)&client_addr, &clilen);
-				//auto er = errno;
+				auto er = errno;
 				ctl_event(fd, true);
 			}
 			else if(events[i].events & EPOLLIN){
@@ -79,36 +79,19 @@ int Network_Interface::epoll_loop(){
 				Websocket_Handler *handler = websocket_handler_map_[fd];
 				if(handler == NULL)
 					continue;
-
-				bufflen = read(fd, buff, BUFFLEN);
-				DEBUG_LOG("%d bytes read", bufflen);
 				ioctl(fd, FIONREAD, &nBytesLeft);
-				DEBUG_LOG("%d bytes left to read", nBytesLeft);
-				//if (nBytesLeft > 0)
-				//{
-				//	/*DEBUG_LOG("message is long, reading all other bytes");
-				//	std::string stringBuff;
-				//	stringBuff.reserve(BUFFLEN + nBytesLeft);
-				//	stringBuff = buff;
-				//	while (nBytesLeft > 0)
-				//	{
-				//		memset(buff, 0, BUFFLEN);
-				//		bufflen = read(fd, buff, BUFFLEN);
-				//		stringBuff += buff;
-				//		ioctl(fd, FIONREAD, &nBytesLeft);
-				//	}
-				//	DEBUG_LOG("all bytes read");
-				//	handler->attach(stringBuff);*/
-				//}
-				//else
-				//{
-				//	handler->attach(buff);
-				//}
-				if(bufflen <= 0) {
-					ctl_event(fd, false);
-				}
-				else{					
+				DEBUG_LOG("%d bytes to read", nBytesLeft);
+				if (nBytesLeft < BUFFLEN) {
+					bufflen = read(fd, buff, BUFFLEN);
 					handler->process(buff, bufflen);
+				}
+				else {
+						std::unique_ptr<uint8_t[]> adBuff(new uint8_t[nBytesLeft]);
+						bufflen = read(fd, adBuff.get(), BUFFLEN);
+						handler->process(adBuff.get(), bufflen);
+				}
+				if (bufflen <= 0) {
+					ctl_event(fd, false);
 				}
 				memset(buff, 0, BUFFLEN);
 			}
