@@ -87,7 +87,7 @@ int Network_Interface::epoll_loop(){
 				}
 				else {
 						std::unique_ptr<uint8_t[]> adBuff(new uint8_t[nBytesLeft]);
-						bufflen = read(fd, adBuff.get(), BUFFLEN);
+						bufflen = read(fd, adBuff.get(), nBytesLeft);
 						handler->process(adBuff.get(), bufflen);
 				}
 				if (bufflen <= 0) {
@@ -97,7 +97,6 @@ int Network_Interface::epoll_loop(){
 			}
 		}
 	}
-
 	return 0;
 }
 

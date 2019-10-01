@@ -79,7 +79,7 @@ int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	send_frame(buffer, wsMessage.plength, inbuff);
 }
 	else {
-		std::unique_ptr<uint8_t[]> adbuf;
+		std::unique_ptr<uint8_t[]> adbuf(new uint8_t[bufflen]);
 		wsMessage.handle(inbuff, adbuf.get());
 		json_error_t jerror;
 		adbuf.get()[wsMessage.plength] = '\0';
