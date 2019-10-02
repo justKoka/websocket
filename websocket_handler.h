@@ -39,6 +39,7 @@ private:
 	int send_frame(uint8_t *frame, int datalen, uint8_t *Buf);
 	void onSuccessfulSubscribe(const std::string &channel, uint8_t *buffer);
 	int make_frame(uint8_t* msg, int msg_length, uint8_t* buffer);
+	void unsubscribe(const std::string &channel/*, uint8_t *buffer*/);
 private:
 	uint8_t buffer[2048];
 	websocket_message wsMessage;
@@ -48,6 +49,7 @@ private:
 	Auth_base authentication;
 	static std::unordered_map<std::string, int> subscriptions;
 	std::list<std::string> subscribedChannels;
+	std::string socketId;
 	//virtual void on_event();
 };
 

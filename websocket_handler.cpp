@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <random>
 
 std::unordered_map<std::string, int> Websocket_Handler::subscriptions;
 
@@ -20,7 +21,19 @@ Websocket_Handler::~Websocket_Handler(){
 
 int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	if (status_ == WEBSOCKET_UNCONNECT) {
-		return handshark(inbuff, bufflen);
+		int ret = handshark(inbuff, bufflen);
+		std::stringstream socktmp;
+		std::random_device rd;
+		std::mt19937 mersenne(rd());
+		uint32_t firstRandNum = mersenne() % 989999999 + 10000000;
+		uint32_t secondRandNum = mersenne() % 989999999 + 10000000;
+		socktmp << firstRandNum << "." << secondRandNum;
+		socketId = socktmp.str();
+		std::cout << std::endl<<"socketId: " << socketId << std::endl;
+		std::stringstream tmp;
+		tmp << "{\"event\":\"pusher:connection_established\",\"data\":\"{\"socket_id\":\"" << socketId << "\",\"activity_timeout\":30}\"}";
+		send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), inbuff);
+		return ret;
 	}
 	if (bufflen < 2048)
 	{
@@ -258,4 +271,26 @@ int Websocket_Handler::make_frame(uint8_t * msg, int msg_length, uint8_t * buffe
 	}
 	memcpy((void *)(buffer + pos), (void *)msg, msg_length);
 	return pos + msg_length;
+}
+
+void Websocket_Handler::unsubscribe(const std::string & channel/*, uint8_t * buffer*/)
+{
+	auto itRange = subscriptions.equal_range(channel);
+	if ((itRange.first != subscriptions.end()) && (itRange.second != subscriptions.end()))
+	{
+		auto it = itRange.first;
+		do
+		{
+			if ((*it).second == fd_)
+				subscriptions.erase(it);
+			else
+				it++;
+		} while (it != itRange.second);
+		subscribedChannels.remove(channel); //O(n)
+		/*std::stringstream tmp;
+		tmp << "{\"event\":\"pusher:unsubscribed\",\"channel\":\"" << channel << "\"}";
+		send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), buffer);*/
+	}
+	else
+		DEBUG_LOG("user with fd: %d is not subscribed on %s channel", fd_, channel.c_str());
 }
