@@ -63,6 +63,7 @@ int Network_Interface::epoll_loop(){
 	int bufflen = 0;
 	int nBytesLeft = 0;
 	uint8_t buff[BUFFLEN];	
+	int adbufflen = 0;
 	memset(buff, 0, BUFFLEN);
 	struct epoll_event events[MAXEVENTSSIZE];
 	while(true){
@@ -81,7 +82,37 @@ int Network_Interface::epoll_loop(){
 					continue;
 				ioctl(fd, FIONREAD, &nBytesLeft);
 				DEBUG_LOG("%d bytes to read", nBytesLeft);
-				if (nBytesLeft < BUFFLEN) {
+				int i = 0;
+				while(nBytesLeft != 0) {
+					bufflen = read(fd, &buff[i], BUFFLEN-i);
+					ioctl(fd, FIONREAD, &nBytesLeft);
+					i += bufflen;
+					if (BUFFLEN - i < nBytesLeft)
+						break;
+				}
+				if (BUFFLEN - i < nBytesLeft) {
+					if (BUFFLEN * 2 - i < nBytesLeft)
+						adbufflen = i + nBytesLeft;
+					else
+						adbufflen = BUFFLEN * 2;
+					auto newbuf = std::malloc(adbufflen);
+					memcpy(newbuf, buff, i);
+					for (; nBytesLeft != 0; i += bufflen) {
+						bufflen = read(fd, newbuf + i, adbufflen - i);
+						ioctl(fd, FIONREAD, &nBytesLeft);
+						if (adbufflen - i < nBytesLeft) {
+							if (adbufflen * 2 - i < nBytesLeft)
+								adbufflen = i + nBytesLeft;
+							else
+								adbufflen = BUFFLEN * 2;
+							newbuf = std::realloc(newbuf, adbufflen);
+						}
+					}
+					handler->process((uint8_t*)newbuf, i);
+				}
+				else
+					handler->process(buff, i);
+				/*if (nBytesLeft < BUFFLEN) {
 					bufflen = read(fd, buff, BUFFLEN);
 					handler->process(buff, bufflen);
 				}
@@ -89,7 +120,7 @@ int Network_Interface::epoll_loop(){
 						std::unique_ptr<uint8_t[]> adBuff(new uint8_t[nBytesLeft]);
 						bufflen = read(fd, adBuff.get(), nBytesLeft);
 						handler->process(adBuff.get(), bufflen);
-				}
+				}*/
 				if (bufflen <= 0) {
 					ctl_event(fd, false);
 				}
@@ -121,12 +152,14 @@ void Network_Interface::ctl_event(int fd, bool flag){
 	ev.events = flag ? EPOLLIN : 0;
 	epoll_ctl(epollfd_, flag ? EPOLL_CTL_ADD : EPOLL_CTL_DEL, fd, &ev);
 	if(flag){
+		//opening frame
 		set_noblock(fd);
 		websocket_handler_map_[fd] = new Websocket_Handler(fd,authentication);
 		if(fd != listenfd_)
 			DEBUG_LOG("fd: %d starting epoll loop", fd);
 	}
 	else{
+		//closing frame
 		close(fd);
 		delete websocket_handler_map_[fd];
 		websocket_handler_map_.erase(fd);

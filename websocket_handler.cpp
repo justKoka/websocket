@@ -14,6 +14,7 @@ Websocket_Handler::Websocket_Handler(int fd, Auth_base authentication):
 		authentication(authentication),
 		subscribedChannels()
 {
+	initSocketId();
 }
 
 Websocket_Handler::~Websocket_Handler(){
@@ -22,14 +23,6 @@ Websocket_Handler::~Websocket_Handler(){
 int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	if (status_ == WEBSOCKET_UNCONNECT) {
 		int ret = handshark(inbuff, bufflen);
-		std::stringstream socktmp;
-		std::random_device rd;
-		std::mt19937 mersenne(rd());
-		uint32_t firstRandNum = mersenne() % 989999999 + 10000000;
-		uint32_t secondRandNum = mersenne() % 989999999 + 10000000;
-		socktmp << firstRandNum << "." << secondRandNum;
-		socketId = socktmp.str();
-		std::cout << std::endl<<"socketId: " << socketId << std::endl;
 		std::stringstream tmp;
 		tmp << "{\"event\":\"pusher:connection_established\",\"data\":\"{\"socket_id\":\"" << socketId << "\",\"activity_timeout\":30}\"}";
 		send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), inbuff);
@@ -55,18 +48,18 @@ int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 		: "";
 
 	if (channelEvent == "pusher:subscribe") {
-		if (channel.compare(0, 9, "private-", 0, 9))
+		if (!channel.compare(0, 8, "private-", 0, 8))
 		{
 			DEBUG_LOG("subcription to private channel %s, authentication required", channel.c_str());
 			if (authentication.privateAuth(channel, sdata))
-			{
+			{	
 				onSuccessfulSubscribe(channel, inbuff);
 				DEBUG_LOG("authentication succeed, subscribed on private channel %s", channel.c_str());
 			}
 			else
 				DEBUG_LOG("authentication failed");
 		}
-		else if (channel.compare(0, 10, "presence-", 0, 10))
+		else if (!channel.compare(0, 9, "presence-", 0, 9))
 		{
 			DEBUG_LOG("subcription to presence channel %s, authentication required", channel.c_str());
 			if (authentication.presenceAuth(channel, sdata))
@@ -293,4 +286,16 @@ void Websocket_Handler::unsubscribe(const std::string & channel/*, uint8_t * buf
 	}
 	else
 		DEBUG_LOG("user with fd: %d is not subscribed on %s channel", fd_, channel.c_str());
+}
+
+void Websocket_Handler::initSocketId()
+{
+	std::stringstream socktmp;
+	std::random_device rd;
+	std::mt19937 mersenne(rd());
+	uint32_t firstRandNum = mersenne() % 989999999 + 10000000;
+	uint32_t secondRandNum = mersenne() % 989999999 + 10000000;
+	socktmp << firstRandNum << "." << secondRandNum;
+	socketId = socktmp.str();
+	//std::cout << std::endl << "socketId: " << socketId << std::endl;
 }

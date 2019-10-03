@@ -40,6 +40,7 @@ private:
 	void onSuccessfulSubscribe(const std::string &channel, uint8_t *buffer);
 	int make_frame(uint8_t* msg, int msg_length, uint8_t* buffer);
 	void unsubscribe(const std::string &channel/*, uint8_t *buffer*/);
+	void initSocketId();
 private:
 	uint8_t buffer[2048];
 	websocket_message wsMessage;
