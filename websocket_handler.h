@@ -30,7 +30,7 @@ public:
 	Websocket_Handler(int fd, Auth_base authentication);
 	~Websocket_Handler();
 	int process(uint8_t buff[], int bufflen);
-	int process(uint8_t buff[], uint8_t adBuff[], int bufflen);
+	void resetSubscriptions();
 private:
 	int handshark(uint8_t* request, int datalen);
 	void parse_str(char *request);

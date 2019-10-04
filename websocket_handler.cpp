@@ -23,9 +23,17 @@ Websocket_Handler::~Websocket_Handler(){
 int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	if (status_ == WEBSOCKET_UNCONNECT) {
 		int ret = handshark(inbuff, bufflen);
-		std::stringstream tmp;
-		tmp << "{\"event\":\"pusher:connection_established\",\"data\":\"{\"socket_id\":\"" << socketId << "\",\"activity_timeout\":30}\"}";
-		send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), inbuff);
+		json_t *conEst = json_object();
+		json_object_set_new(conEst, "event", json_string("pusher:connection_established"));
+		json_t *data = json_object();
+		json_object_set_new(data, "socket_id", json_string(socketId.c_str()));
+		json_object_set_new(data, "activity_timeout", json_pack("i",30));
+		json_object_set_new(conEst, "data", json_string(json_dumps(data, 0)));
+		char *dumped = json_dumps(conEst, 0);
+		std::cout << "dumped: " << dumped << std::endl;
+		/*tmp << "{\"event\":\"pusher:connection_established\",\"data\":\"{\"socket_id\":\"" << socketId << "\",\"activity_timeout\":30}\"}";*/
+		/*send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), inbuff);*/
+		send_frame((uint8_t*)dumped, strlen(dumped), inbuff);
 		return ret;
 	}
 	if (bufflen < 2048)
@@ -79,7 +87,7 @@ int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	}
 	else if (channelEvent == "pusher:unsubscribe")
 	{
-		//unsubcribe(channel);
+		unsubscribe(channel);
 		DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
 	}
 	send_frame(buffer, wsMessage.plength, inbuff);
@@ -135,7 +143,7 @@ int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 		}
 		else if (channelEvent == "pusher:unsubscribe")
 		{
-			//unsubcribe(channel);
+			unsubscribe(channel);
 			DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
 		}
 		send_frame(adbuf.get(), wsMessage.plength, inbuff);
@@ -143,18 +151,18 @@ int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	return 0;
 }
 
-int Websocket_Handler::process(uint8_t buff[], uint8_t adBuff[], int bufflen)
+void Websocket_Handler::resetSubscriptions()
 {
-	return 0;
+	for (auto channel = subscribedChannels.begin(); channel != subscribedChannels.end(); )
+		unsubscribe(*channel);
 }
 
 int Websocket_Handler::handshark(uint8_t* request, int datalen){
-
-	status_ = WEBSOCKET_HANDSHARKED;
 	request[datalen] = '\0';
 	fetch_http_info((char*)request);
 	memset(buffer, 0, 2048);
 	parse_str((char*)buffer);
+	status_ = WEBSOCKET_HANDSHARKED;
 	return send_data(buffer, strlen((char*)buffer));
 }
 
@@ -164,7 +172,6 @@ void Websocket_Handler::parse_str(char *request){
 	strcat(request, "Sec-WebSocket-Accept: ");
 	std::string server_key = header_map_["Sec-WebSocket-Key"];
 	server_key += MAGIC_KEY;
-
 	SHA1 sha;
 	unsigned int message_digest[5];
 	sha.Reset();
@@ -274,8 +281,10 @@ void Websocket_Handler::unsubscribe(const std::string & channel/*, uint8_t * buf
 		auto it = itRange.first;
 		do
 		{
-			if ((*it).second == fd_)
+			if ((*it).second == fd_) {
 				subscriptions.erase(it);
+				break;
+			}
 			else
 				it++;
 		} while (it != itRange.second);

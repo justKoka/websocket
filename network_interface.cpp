@@ -40,7 +40,7 @@ int Network_Interface::init(){
 	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	server_addr.sin_port = htons(PORT);
 	if(-1 == bind(listenfd_, (struct sockaddr *)(&server_addr), sizeof(server_addr))){
-		int er = errno;
+		//int er = errno;
 		DEBUG_LOG("绑定套接字失败!");
 		return -1;
 	}
@@ -65,6 +65,7 @@ int Network_Interface::epoll_loop(){
 	uint8_t buff[BUFFLEN];	
 	int adbufflen = 0;
 	memset(buff, 0, BUFFLEN);
+	bool isClosed = false;
 	struct epoll_event events[MAXEVENTSSIZE];
 	while(true){
 		nfds = epoll_wait(epollfd_, events, MAXEVENTSSIZE, TIMEWAIT);
@@ -81,10 +82,16 @@ int Network_Interface::epoll_loop(){
 				if(handler == NULL)
 					continue;
 				ioctl(fd, FIONREAD, &nBytesLeft);
+				if (nBytesLeft == 0) {
+					bufflen = read(fd, buff, BUFFLEN);
+					if (bufflen <= 0) {
+							ctl_event(fd, false);
+						}
+				}
 				DEBUG_LOG("%d bytes to read", nBytesLeft);
 				int i = 0;
 				while(nBytesLeft != 0) {
-					bufflen = read(fd, &buff[i], BUFFLEN-i);
+					bufflen = read(fd, &buff[i], BUFFLEN-i);	
 					ioctl(fd, FIONREAD, &nBytesLeft);
 					i += bufflen;
 					if (BUFFLEN - i < nBytesLeft)
@@ -109,9 +116,11 @@ int Network_Interface::epoll_loop(){
 						}
 					}
 					handler->process((uint8_t*)newbuf, i);
+					std::free(newbuf);
 				}
 				else
-					handler->process(buff, i);
+					if (!isClosed)
+						handler->process(buff, i);
 				/*if (nBytesLeft < BUFFLEN) {
 					bufflen = read(fd, buff, BUFFLEN);
 					handler->process(buff, bufflen);
@@ -121,10 +130,10 @@ int Network_Interface::epoll_loop(){
 						bufflen = read(fd, adBuff.get(), nBytesLeft);
 						handler->process(adBuff.get(), bufflen);
 				}*/
-				if (bufflen <= 0) {
-					ctl_event(fd, false);
-				}
-				memset(buff, 0, BUFFLEN);
+				//if (bufflen <= 0) {
+				//	ctl_event(fd, false);
+				//}
+				//memset(buff, 0, BUFFLEN);
 			}
 		}
 	}
@@ -160,6 +169,8 @@ void Network_Interface::ctl_event(int fd, bool flag){
 	}
 	else{
 		//closing frame
+		Websocket_Handler *handler = websocket_handler_map_[fd];
+		handler->resetSubscriptions();
 		close(fd);
 		delete websocket_handler_map_[fd];
 		websocket_handler_map_.erase(fd);
@@ -167,7 +178,8 @@ void Network_Interface::ctl_event(int fd, bool flag){
 	}
 }
 
-void Network_Interface::run(Auth_base &auth){
+void Network_Interface::run(Auth_base &auth, int port){
 	authentication = auth;
+	PORT = port;
 	epoll_loop();
 }
