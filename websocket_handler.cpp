@@ -12,7 +12,9 @@ Websocket_Handler::Websocket_Handler(int fd, Auth_base authentication):
 		header_map_(),
 		fd_(fd),
 		authentication(authentication),
-		subscribedChannels()
+		subscribedChannels(),
+		i(0),
+		firstCame(true)
 {
 	initSocketId();
 }
@@ -22,130 +24,47 @@ Websocket_Handler::~Websocket_Handler(){
 
 int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 	if (status_ == WEBSOCKET_UNCONNECT) {
-		int ret = handshark(inbuff, bufflen);
-		json_t *conEst = json_object();
-		json_object_set_new(conEst, "event", json_string("pusher:connection_established"));
-		json_t *data = json_object();
-		json_object_set_new(data, "socket_id", json_string(socketId.c_str()));
-		json_object_set_new(data, "activity_timeout", json_pack("i",30));
-		json_object_set_new(conEst, "data", json_string(json_dumps(data, 0)));
-		char *dumped = json_dumps(conEst, 0);
-		std::cout << "dumped: " << dumped << std::endl;
-		/*tmp << "{\"event\":\"pusher:connection_established\",\"data\":\"{\"socket_id\":\"" << socketId << "\",\"activity_timeout\":30}\"}";*/
-		/*send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), inbuff);*/
-		send_frame((uint8_t*)dumped, strlen(dumped), inbuff);
+		int ret = 1;
+		if (inbuff[bufflen-1] == 0x0a && inbuff[bufflen - 2] == 0x0d && inbuff[bufflen - 3] == 0x0a && inbuff[bufflen - 4] == 0x0d)
+			if (firstCame) {
+				ret = handshark(inbuff, bufflen);
+				char dumped1[128];
+				sprintf(dumped1, "{\"event\": \"pusher:connection_established\", \"data\": \"{\\\"socket_id\\\": \\\"%s\\\", \\\"activity_timeout\\\": 30}\"}", socketId.c_str());
+				std::cout << "dumped1: " << dumped1 << std::endl;
+				send_frame((uint8_t*)dumped1, strlen(dumped1), inbuff);
+				return ret;
+			}
+			else
+			{
+				memcpy(&buffer[i], inbuff, bufflen);
+				i += bufflen;
+				ret = handshark(buffer, i);
+				char dumped1[128];
+				sprintf(dumped1, "{\"event\": \"pusher:connection_established\", \"data\": \"{\\\"socket_id\\\": \\\"%s\\\", \\\"activity_timeout\\\": 30}\"}", socketId.c_str());
+				std::cout << "dumped1: " << dumped1 << std::endl;
+				send_frame((uint8_t*)dumped1, strlen(dumped1), inbuff);
+				return ret;
+			}
+		else
+		{
+			memcpy(buffer, inbuff, bufflen);
+			i += bufflen;
+			firstCame = false;
+		}
+		//0d 0a 0d 0a -> means http request ended
+		//sprintf
 		return ret;
 	}
 	if (bufflen < 2048)
 	{
 	wsMessage.handle(inbuff, buffer);
-	json_error_t jerror;
-	buffer[wsMessage.plength] = '\0';
-	json_t *json = json_loadb((const char*)buffer, wsMessage.plength + 1, 0, &jerror);
-	/*if (!json)
-		DEBUG_LOG("Error parsing json data from server: %s\ndata was: %s",
-			jerror.text, request_->get_payload().c_str());
-	*/
-	const std::string channelEvent = json_object_get(json, "event") ?
-		json_string_value(json_object_get(json, "event")) : "";
-	const std::string channel = json_object_get(json, "channel") ?
-		json_string_value(json_object_get(json, "channel")) : "";
-	const std::string sdata = json_object_get(json, "data") ?
-		(json_is_string(json_object_get(json, "data")) ?
-			json_string_value(json_object_get(json, "data")) : "")
-		: "";
-
-	if (channelEvent == "pusher:subscribe") {
-		if (!channel.compare(0, 8, "private-", 0, 8))
-		{
-			DEBUG_LOG("subcription to private channel %s, authentication required", channel.c_str());
-			if (authentication.privateAuth(channel, sdata))
-			{	
-				onSuccessfulSubscribe(channel, inbuff);
-				DEBUG_LOG("authentication succeed, subscribed on private channel %s", channel.c_str());
-			}
-			else
-				DEBUG_LOG("authentication failed");
-		}
-		else if (!channel.compare(0, 9, "presence-", 0, 9))
-		{
-			DEBUG_LOG("subcription to presence channel %s, authentication required", channel.c_str());
-			if (authentication.presenceAuth(channel, sdata))
-			{
-				onSuccessfulSubscribe(channel, inbuff);
-				DEBUG_LOG("authentication succeed, subscribed on presence channel %s", channel.c_str());
-			}
-			else
-				DEBUG_LOG("authentication failed");
-		}
-		else
-		{
-			DEBUG_LOG("subcription to channel %s", channel.c_str());
-			onSuccessfulSubscribe(channel, inbuff);
-			DEBUG_LOG("subscribed on channel %s", channel.c_str());
-		}
-	}
-	else if (channelEvent == "pusher:unsubscribe")
-	{
-		unsubscribe(channel);
-		DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
-	}
+	pusherHandle(buffer,inbuff);
 	send_frame(buffer, wsMessage.plength, inbuff);
 }
 	else {
 		std::unique_ptr<uint8_t[]> adbuf(new uint8_t[bufflen]);
 		wsMessage.handle(inbuff, adbuf.get());
-		json_error_t jerror;
-		adbuf.get()[wsMessage.plength] = '\0';
-		json_t *json = json_loadb((const char*)adbuf.get(), wsMessage.plength + 1, 0, &jerror);
-		/*if (!json)
-			DEBUG_LOG("Error parsing json data from server: %s\ndata was: %s",
-				jerror.text, request_->get_payload().c_str());
-		*/
-		const std::string channelEvent = json_object_get(json, "event") ?
-			json_string_value(json_object_get(json, "event")) : "";
-		const std::string channel = json_object_get(json, "channel") ?
-			json_string_value(json_object_get(json, "channel")) : "";
-		const std::string sdata = json_object_get(json, "data") ?
-			(json_is_string(json_object_get(json, "data")) ?
-				json_string_value(json_object_get(json, "data")) : "")
-			: "";
-
-		if (channelEvent == "pusher:subscribe") {
-			if (channel.compare(0, 9, "private-", 0, 9))
-			{
-				DEBUG_LOG("subcription to private channel %s, authentication required", channel.c_str());
-				if (authentication.privateAuth(channel, sdata))
-				{
-					onSuccessfulSubscribe(channel, inbuff);
-					DEBUG_LOG("authentication succeed, subscribed on private channel %s", channel.c_str());
-				}
-				else
-					DEBUG_LOG("authentication failed");
-			}
-			else if (channel.compare(0, 10, "presence-", 0, 10))
-			{
-				DEBUG_LOG("subcription to presence channel %s, authentication required", channel.c_str());
-				if (authentication.presenceAuth(channel, sdata))
-				{
-					onSuccessfulSubscribe(channel, inbuff);
-					DEBUG_LOG("authentication succeed, subscribed on presence channel %s", channel.c_str());
-				}
-				else
-					DEBUG_LOG("authentication failed");
-			}
-			else
-			{
-				DEBUG_LOG("subcription to channel %s", channel.c_str());
-				onSuccessfulSubscribe(channel, inbuff);
-				DEBUG_LOG("subscribed on channel %s", channel.c_str());
-			}
-		}
-		else if (channelEvent == "pusher:unsubscribe")
-		{
-			unsubscribe(channel);
-			DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
-		}
+		pusherHandle(adbuf.get(), inbuff);
 		send_frame(adbuf.get(), wsMessage.plength, inbuff);
 	}
 	return 0;
@@ -154,7 +73,7 @@ int Websocket_Handler::process(uint8_t inbuff[], int bufflen) {
 void Websocket_Handler::resetSubscriptions()
 {
 	for (auto channel = subscribedChannels.begin(); channel != subscribedChannels.end(); )
-		unsubscribe(*channel);
+		channel = unsubscribe(channel);
 }
 
 int Websocket_Handler::handshark(uint8_t* request, int datalen){
@@ -243,7 +162,7 @@ void Websocket_Handler::onSuccessfulSubscribe(const std::string & channel, uint8
 	Websocket_Handler::subscriptions.insert(std::make_pair(channel, fd_));
 	subscribedChannels.push_back(channel);
 	std::stringstream tmp;
-	tmp << "{\"event\":\"pusher:subscription_succeed\",\"channel\":\"" << channel << "\"}";
+	tmp << "{\"event\":\"pusher_internal:subscription_succeeded\",\"channel\":\"" << channel << "\"}";
 	send_frame((uint8_t*)tmp.str().c_str(), tmp.str().length(), buffer);
 }
 
@@ -276,18 +195,19 @@ int Websocket_Handler::make_frame(uint8_t * msg, int msg_length, uint8_t * buffe
 void Websocket_Handler::unsubscribe(const std::string & channel/*, uint8_t * buffer*/)
 {
 	auto itRange = subscriptions.equal_range(channel);
-	if ((itRange.first != subscriptions.end()) && (itRange.second != subscriptions.end()))
+	if (itRange.first != subscriptions.end())
 	{
 		auto it = itRange.first;
-		do
-		{
+		while (it != itRange.second) {
 			if ((*it).second == fd_) {
-				subscriptions.erase(it);
+				auto ft = it;
+				it++;
+				subscriptions.erase(ft);
 				break;
 			}
 			else
 				it++;
-		} while (it != itRange.second);
+		}
 		subscribedChannels.remove(channel); //O(n)
 		/*std::stringstream tmp;
 		tmp << "{\"event\":\"pusher:unsubscribed\",\"channel\":\"" << channel << "\"}";
@@ -295,6 +215,91 @@ void Websocket_Handler::unsubscribe(const std::string & channel/*, uint8_t * buf
 	}
 	else
 		DEBUG_LOG("user with fd: %d is not subscribed on %s channel", fd_, channel.c_str());
+}
+
+std::__cxx11::list<std::__cxx11::string>::iterator Websocket_Handler::unsubscribe(std::__cxx11::list<std::__cxx11::string>::iterator channel)
+{
+	auto itRange = subscriptions.equal_range(*channel);
+	if (itRange.first != subscriptions.end())
+	{
+		auto it = itRange.first;
+		while (it != itRange.second) {
+			if ((*it).second == fd_) {
+				auto ft = it;
+				it++;
+				subscriptions.erase(ft);
+				break;
+			}
+			else
+				it++;
+		}
+		auto tmp = channel;
+		++tmp;
+		subscribedChannels.erase(channel); //O(n)
+		return tmp;
+	}
+	else
+	{
+		DEBUG_LOG("user with fd: %d is not subscribed on %s channel", fd_, (*channel).c_str());
+		return subscribedChannels.end();
+	}
+}
+
+void Websocket_Handler::pusherHandle(uint8_t * buff, uint8_t * inbuff)
+{
+	json_error_t jerror;
+	buff[wsMessage.plength] = '\0';
+	std::cout << std::endl << "unmasked message: " << buff << std::endl;
+	json_t *json = json_loadb((const char*)buff, wsMessage.plength, 0, &jerror);
+	const std::string channelEvent = json_object_get(json, "event") ?
+		json_string_value(json_object_get(json, "event")) : "";
+	//const std::string data = json_object_get(json, "data") ?
+	//	(json_is_string(json_object_get(json, "data")) ?
+	//		json_string_value(json_object_get(json, "data")) : "")
+	//	: "";
+	json_t *data = json_is_string(json_object_get(json, "data")) ? 
+		json_loadb(json_string_value(json_object_get(json, "data")), strlen(json_string_value(json_object_get(json, "data"))), 0, &jerror) : 
+		json_object_get(json, "data");
+	const std::string channel = json_object_get(json, "channel") ? 
+		json_string_value(json_object_get(json, "channel")) : 
+		(json_object_get(data, "channel") ? 
+		json_string_value(json_object_get(data, "channel")) : "");
+
+	if (channelEvent == "pusher:subscribe") {
+		if (!channel.compare(0, 8, "private-", 0, 8))
+		{
+			DEBUG_LOG("subcription to private channel %s, authentication required", channel.c_str());
+			if (authentication.privateAuth(channel, json_dumps(data, 0)))
+			{
+				onSuccessfulSubscribe(channel, inbuff);
+				DEBUG_LOG("authentication succeed, subscribed on private channel %s", channel.c_str());
+			}
+			else
+				DEBUG_LOG("authentication failed");
+		}
+		else if (!channel.compare(0, 9, "presence-", 0, 9))
+		{
+			DEBUG_LOG("subcription to presence channel %s, authentication required", channel.c_str());
+			if (authentication.presenceAuth(channel, json_dumps(data, 0)))
+			{
+				onSuccessfulSubscribe(channel, inbuff);
+				DEBUG_LOG("authentication succeed, subscribed on presence channel %s", channel.c_str());
+			}
+			else
+				DEBUG_LOG("authentication failed");
+		}
+		else
+		{
+			DEBUG_LOG("subcription to channel %s", channel.c_str());
+			onSuccessfulSubscribe(channel, inbuff);
+			DEBUG_LOG("subscribed on channel %s", channel.c_str());
+		}
+	}
+	else if (channelEvent == "pusher:unsubscribe")
+	{
+		unsubscribe(channel);
+		DEBUG_LOG("unsubscribed from channel %s", channel.c_str());
+	}
 }
 
 void Websocket_Handler::initSocketId()

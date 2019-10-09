@@ -3,7 +3,7 @@
 #include "Auth_base.h"
 #include "websocket_handler.h"
 
-//constexpr int PORT = 9001;
+constexpr int PORT = 9001;
 constexpr int TIMEWAIT = 100;
 constexpr int BUFFLEN = 2048;
 constexpr int MAXEVENTSSIZE = 20;
@@ -19,10 +19,9 @@ private:
 	int set_noblock(int fd);
 	void ctl_event(int fd, bool flag);
 public:
-	void run(Auth_base&, int PORT);
+	void run(Auth_base&);
 	static Network_Interface *get_share_network_interface();
 private:
-	uint16_t PORT;
 	Auth_base authentication;
 	int epollfd_;
 	int listenfd_;

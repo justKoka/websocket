@@ -11,7 +11,6 @@
 #include "base64.h"
 #include "sha1.h"
 #include "debug_log.h"
-#include "websocket_request.h"
 #include "websocket_message.h"
 #include <jansson.h>
 #include "Auth_base.h"
@@ -40,6 +39,8 @@ private:
 	void onSuccessfulSubscribe(const std::string &channel, uint8_t *buffer);
 	int make_frame(uint8_t* msg, int msg_length, uint8_t* buffer);
 	void unsubscribe(const std::string &channel/*, uint8_t *buffer*/);
+	std::__cxx11::list<std::__cxx11::string>::iterator unsubscribe(std::__cxx11::list<std::__cxx11::string>::iterator it);
+	void pusherHandle(uint8_t *buff, uint8_t *inbuff);
 	void initSocketId();
 private:
 	uint8_t buffer[2048];
@@ -51,6 +52,8 @@ private:
 	static std::unordered_map<std::string, int> subscriptions;
 	std::list<std::string> subscribedChannels;
 	std::string socketId;
+	uint32_t i;
+	bool firstCame;
 	//virtual void on_event();
 };
 
